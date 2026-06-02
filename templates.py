@@ -9,28 +9,39 @@ def _fmt_date(d):
 
 def build_template_a(events, today):
     # type: (List[Dict], date_type) -> str
-    lines = [
-        "\U0001f6a8 WINGS GOLD CLUB — HIGH IMPACT NEWS ALERT \U0001f6a8",
-        "",
-        "Good afternoon, traders. Institutional money does not guess; it waits for data. Protect your capital and mark your calendars.",
-        "",
-        "Today’s High-Impact USD Economic Events (Singapore Time):",
-        "",
-        "\U0001f4c5 Date: {}".format(_fmt_date(today)),
-    ]
+    # Build event list lines
+    event_lines = []
     for ev in events:
+        impact_label = "High Volatility" if ev["impact"].lower() == "high" else "Medium Volatility"
         icon = "\U0001f534" if ev["impact"].lower() == "high" else "\U0001f7e0"
-        lines.append("• ⏱️ {} — USD: {} {}".format(
-            ev["time_sgt_str"], ev["title"], icon
+        event_lines.append("• {} {} SGT – USD: {} ({})".format(
+            icon, ev["time_sgt_str"], ev["title"], impact_label
         ))
-    lines += [
+
+    # Reference the first (or only) high-impact event in the body text
+    primary = next((e for e in events if e["impact"].lower() == "high"), events[0])
+    primary_ref = "{} at {}".format(primary["title"], primary["time_sgt_str"])
+
+    lines = [
+        "\U0001f3c6 WINGS GOLD CLUB – DAILY MACRO UPDATE \U0001f3c6",
         "",
-        "\U0001f4a1 INTRADAY ANALYSIS & BIAS:",
-        "Expect the morning Asian session to hold a tight compression. Do not chase the early breakout chop.",
+        "Good afternoon, traders. Institutional money does not guess; it waits for data. If you do not know the economic calendar today, you are the liquidity.",
         "",
-        "Look for market manipulation sweeping the London session highs/lows roughly 15–30 minutes prior to the release timings above, as market makers trap retail liquidity.",
+        "\U0001f534 HIGH-IMPACT USD NEWS TODAY (Singapore Time):",
+    ] + event_lines + [
         "",
-        "Detailed execution signals will drop live in the VIP channel post-release once the volatility clears. Manage your risk! \U0001f41c",
+        "\U0001f4c9 THE GAME PLAN FOR XAUUSD:",
+        "The morning Asian session is likely to be a low-volume accumulation zone. Do not chase the early breakouts or you will get chopped up.",
+        "",
+        "Keep your eyes locked on the 2:00 PM – 3:00 PM SGT window for the London open to map out your initial intraday bias.",
+        "",
+        "With {} dropping today, expect the market to manipulate the London highs or lows right before the release to trap retail traders.".format(primary_ref),
+        "",
+        "We will be looking for execution setups inside the VIP channel once the true direction prints. Protect your capital and manage your risk. \U0001f41c",
+        "",
+        "Let’s hunt.",
+        "",
+        "Wings Gold Club",
     ]
     return "\n".join(lines)
 
@@ -38,17 +49,21 @@ def build_template_a(events, today):
 def build_template_b(today):
     # type: (date_type) -> str
     lines = [
-        "\U0001f48e WINGS GOLD CLUB — MARKET UPDATE \U0001f48e",
+        "\U0001f3c6 WINGS GOLD CLUB – DAILY MACRO UPDATE \U0001f3c6",
         "",
         "Good afternoon, traders. Checking the macro calendar for today:",
         "",
         "\U0001f4c5 Date: {}".format(_fmt_date(today)),
         "• \U0001f7e2 No High or Medium Impact USD News Scheduled.",
         "",
-        "\U0001f4a1 INTRADAY ANALYSIS & BIAS:",
-        "With no major macro data drivers on the horizon today, technical price structures, clean trend continuations, and volume flows during the London (2 PM SGT) and New York (8 PM SGT) session opens will fully dictate XAUUSD directional movement.",
+        "\U0001f4c9 THE GAME PLAN FOR XAUUSD:",
+        "With no major macro data drivers today, technical price structures, clean trend continuations, and volume flows during the London (2:00 PM – 3:00 PM SGT) and New York (8:00 PM – 9:00 PM SGT) session opens will fully dictate XAUUSD directional movement.",
         "",
-        "Trade setups will be posted in the VIP room normally. Stay disciplined. \U0001f41c",
+        "Trade setups will be posted in the VIP channel as usual. Stay disciplined. \U0001f41c",
+        "",
+        "Let's hunt.",
+        "",
+        "Wings Gold Club",
     ]
     return "\n".join(lines)
 
