@@ -1,5 +1,6 @@
-BOT_TOKEN = "REPLACE_WITH_YOUR_BOT_TOKEN"
+BOT_TOKEN = "8933007612:AAFuzU5q940rO5w8dJSKArTR4AeNVa0EuWE"
 CHANNEL_ID = "@wingsgoldclub"
+PERSONAL_ID = "8719527581"  # receives a copy of every message for monitoring
 
 STATE_DIR = "state"
 
