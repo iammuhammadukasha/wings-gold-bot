@@ -22,5 +22,5 @@ def send_message(text):
     # type: (str) -> bool
     """Send to the main channel and a personal copy to PERSONAL_ID."""
     channel_ok = _post(CHANNEL_ID, text)
-    _post(PERSONAL_ID, text)
-    return channel_ok
+    personal_ok = _post(PERSONAL_ID, text)
+    return channel_ok or personal_ok
