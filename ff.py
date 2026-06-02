@@ -98,8 +98,8 @@ def _build_event(item, event_date):
     }
 
 
-def _fetch_raw(url):
-    # type: (str) -> List[Dict]
+def _fetch_raw(url, silent_404=False):
+    # type: (str, bool) -> List[Dict]
     try:
         resp = requests.get(
             url,
@@ -109,6 +109,8 @@ def _fetch_raw(url):
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
+        if silent_404 and "404" in str(e):
+            return []
         print("FF fetch error ({}): {}".format(url, e))
         return []
 
@@ -119,9 +121,10 @@ def fetch_today_events():
     today_sgt = datetime.now(SGT).date()
     raw = _fetch_raw(FF_URL)
 
-    # If today falls outside this week's data, try next week
-    if not raw or not any(_parse_ff_date(item.get("date", "")) == today_sgt for item in raw):
-        extra = _fetch_raw(FF_URL_NEXT)
+    # Only try next week if today falls outside this week's data (e.g. weekend boundary)
+    week_dates = set(_parse_ff_date(item.get("date", "")) for item in raw)
+    if today_sgt not in week_dates:
+        extra = _fetch_raw(FF_URL_NEXT, silent_404=True)
         raw = raw + extra
 
     events = []
