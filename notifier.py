@@ -1,5 +1,5 @@
 import requests
-from config import BOT_TOKEN, CHANNEL_ID, PERSONAL_ID
+from config import BOT_TOKEN, CHANNEL_ID, SEND_TO_CHANNEL, PERSONAL_RECIPIENTS
 
 
 def _post(chat_id, text):
@@ -20,7 +20,13 @@ def _post(chat_id, text):
 
 def send_message(text):
     # type: (str) -> bool
-    """Send to the main channel and a personal copy to PERSONAL_ID."""
-    channel_ok = _post(CHANNEL_ID, text)
-    personal_ok = _post(PERSONAL_ID, text)
-    return channel_ok or personal_ok
+    """Send to personal recipients always; channel only when SEND_TO_CHANNEL is True."""
+    results = []
+
+    if SEND_TO_CHANNEL:
+        results.append(_post(CHANNEL_ID, text))
+
+    for uid in PERSONAL_RECIPIENTS:
+        results.append(_post(uid, text))
+
+    return any(results)

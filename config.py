@@ -1,6 +1,14 @@
 BOT_TOKEN = "8933007612:AAFuzU5q940rO5w8dJSKArTR4AeNVa0EuWE"
 CHANNEL_ID = "@wingsgoldclub"
-PERSONAL_ID = "8719527581"  # receives a copy of every message for monitoring
+
+# Set to True once client approves and bot is ready to post to the channel
+SEND_TO_CHANNEL = False
+
+# Personal recipients — always receive a copy
+PERSONAL_RECIPIENTS = [
+    "8719527581",   # admin (you)
+    "8503903018",   # client (@wgcadmin) — approval preview
+]
 
 STATE_DIR = "state"
 
