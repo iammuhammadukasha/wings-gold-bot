@@ -143,6 +143,52 @@ def run_post_release():
 
 
 # ---------------------------------------------------------------------------
+# Test — send all four templates with sample data
+# ---------------------------------------------------------------------------
+
+def run_test_all():
+    from datetime import date
+    now_sgt = datetime.now(SGT)
+    today = now_sgt.date()
+
+    _log("Sending Template A (active news day)...")
+    sample_events = [
+        {
+            "title": "JOLTs Job Openings",
+            "impact": "High",
+            "time_sgt_str": "10:00 PM SGT",
+        },
+        {
+            "title": "ISM Manufacturing PMI",
+            "impact": "Medium",
+            "time_sgt_str": "11:00 PM SGT",
+        },
+    ]
+    send_message(build_template_a(sample_events, today))
+
+    _log("Sending Template B (no news day)...")
+    send_message(build_template_b(today))
+
+    _log("Sending Template C (schedule change)...")
+    send_message(build_template_c("Non-Farm Payrolls", "08:30 PM SGT", "09:00 PM SGT"))
+
+    _log("Sending Template D (post-release result)...")
+    sample_event = {
+        "title": "JOLTs Job Openings",
+        "actual": "7.19M",
+        "forecast": "7.48M",
+        "previous": "7.48M",
+    }
+    result = {
+        "data_text": "USD DATA CAME OUT WEAKER THAN EXPECTED (BAD FOR USD)",
+        "bias": "LOOK FOR BUY SETUPS (Bullish Gold Momentum)",
+    }
+    send_message(build_template_d(sample_event, result))
+
+    _log("All four templates sent.")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -154,6 +200,8 @@ def main():
                         help="Check for schedule changes (cron: every 15 min)")
     parser.add_argument("--post-release", action="store_true",
                         help="Send post-release analysis (cron: every 1 min)")
+    parser.add_argument("--test-all", action="store_true",
+                        help="Send all four templates with sample data for review")
 
     args = parser.parse_args()
 
@@ -163,6 +211,8 @@ def main():
         run_watchdog()
     elif args.post_release:
         run_post_release()
+    elif args.test_all:
+        run_test_all()
     else:
         parser.print_help()
         sys.exit(1)
