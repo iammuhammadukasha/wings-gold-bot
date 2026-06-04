@@ -11,18 +11,19 @@ def build_template_a(events, today):
     # type: (List[Dict], date_type) -> str
     event_lines = []
     for ev in events:
-        impact_label = "High Volatility" if ev["impact"].lower() == "high" else "Medium Volatility"
-        event_lines.append("• {} SGT - USD: {} ({})".format(
-            ev["time_sgt_str"], ev["title"], impact_label
-        ))
+        icon = "\U0001f534" if ev["impact"].lower() == "high" else "\U0001f7e0"
+        event_lines.append("{} {} — {}".format(icon, ev["time_sgt_str"], ev["title"]))
 
     lines = [
         "\U0001f6a8 WINGS GOLD CLUB — DAILY NEWS & IMPACT UPDATE \U0001f6a8",
         "",
         "Good afternoon traders. Checking the economic news calendar for today:",
         "",
-        "HIGH-IMPACT USD NEWS TODAY (Singapore Time):",
+        "\U0001f4cc USD HIGH-IMPACT NEWS TODAY (Singapore Time):",
+        "",
     ] + event_lines + [
+        "",
+        "\U0001f534 = High Impact   \U0001f7e0 = Medium Impact",
         "",
         "Watch the 2:00 PM - 3:00 PM SGT window for the London open to map out initial intraday bias.",
         "",
