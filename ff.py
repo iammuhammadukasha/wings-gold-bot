@@ -131,12 +131,17 @@ def _build_event(item, event_date):
 
 def _fetch_raw(url, silent_404=False):
     # type: (str, bool) -> List[Dict]
+    import time
     try:
         resp = requests.get(
             url,
             timeout=15,
             headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"},
         )
+        if resp.status_code == 429:
+            time.sleep(3)
+            resp = requests.get(url, timeout=15,
+                                headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"})
         resp.raise_for_status()
 
         # Decode as windows-1252 (FF XML encoding), fix unescaped & outside CDATA,
