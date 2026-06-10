@@ -70,7 +70,7 @@ def _parse_ff_date(raw):
 
 def _parse_event_time_sgt(time_str, event_date):
     # type: (str, date) -> Optional[datetime]
-    """Parse FF time (Eastern) and return SGT-aware datetime."""
+    """Parse FF time (UTC) and return SGT-aware datetime."""
     t = time_str.strip().lower()
     if not t or t in ("all day", "tentative", ""):
         return None
@@ -82,8 +82,8 @@ def _parse_event_time_sgt(time_str, event_date):
         )
     except ValueError:
         return None
-    eastern_dt = EASTERN.localize(naive)
-    return eastern_dt.astimezone(SGT)
+    utc_dt = pytz.utc.localize(naive)
+    return utc_dt.astimezone(SGT)
 
 
 def _to_float(s):
