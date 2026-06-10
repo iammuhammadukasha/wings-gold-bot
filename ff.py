@@ -2,11 +2,12 @@ import os
 import json
 import requests
 import pytz
+import xml.etree.ElementTree as ET
 from datetime import datetime, date
 from typing import List, Dict, Optional, Any
 
-FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
+FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
+FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.xml"
 
 _CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
 _CACHE_TTL_SECONDS = 300  # 5 minutes — caps FF requests to ~12/hour
@@ -58,7 +59,7 @@ def _is_inverted(title):
 
 def _parse_ff_date(raw):
     # type: (str) -> Optional[date]
-    for fmt in ("%b %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
+    for fmt in ("%m-%d-%Y", "%b %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
         try:
             return datetime.strptime(raw.strip(), fmt).date()
         except ValueError:
@@ -136,9 +137,25 @@ def _fetch_raw(url, silent_404=False):
             headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"},
         )
         resp.raise_for_status()
-        return resp.json()
+        root = ET.fromstring(resp.content)
+        events = []
+        for ev in root.findall("event"):
+            def _t(tag):
+                el = ev.find(tag)
+                return el.text.strip() if el is not None and el.text else ""
+            events.append({
+                "title":    _t("title"),
+                "country":  _t("country"),
+                "date":     _t("date"),
+                "time":     _t("time"),
+                "impact":   _t("impact"),
+                "forecast": _t("forecast"),
+                "previous": _t("previous"),
+                "actual":   _t("actual"),
+            })
+        return events
     except Exception as e:
-        if silent_404 and "404" in str(e):
+        if silent_404 and ("404" in str(e) or "Not Found" in str(e)):
             return []
         print("FF fetch error ({}): {}".format(url, e))
         return []
