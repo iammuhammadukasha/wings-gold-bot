@@ -1,3 +1,5 @@
+import os
+import json
 import requests
 import pytz
 from datetime import datetime, date
@@ -5,6 +7,33 @@ from typing import List, Dict, Optional, Any
 
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
+
+_CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
+_CACHE_TTL_SECONDS = 300  # 5 minutes — caps FF requests to ~12/hour
+
+
+def _load_raw_cache():
+    # type: () -> Optional[List[Dict]]
+    try:
+        with open(_CACHE_FILE, "r") as f:
+            data = json.load(f)
+        age = (datetime.utcnow() - datetime.strptime(data["ts"], "%Y-%m-%dT%H:%M:%S")).total_seconds()
+        if age < _CACHE_TTL_SECONDS:
+            return data["raw"]
+    except Exception:
+        pass
+    return None
+
+
+def _save_raw_cache(raw):
+    # type: (List[Dict]) -> None
+    try:
+        if not os.path.exists("state"):
+            os.makedirs("state")
+        with open(_CACHE_FILE, "w") as f:
+            json.dump({"ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "raw": raw}, f)
+    except Exception:
+        pass
 
 SGT = pytz.timezone("Asia/Singapore")
 EASTERN = pytz.timezone("US/Eastern")
@@ -115,11 +144,18 @@ def _fetch_raw(url, silent_404=False):
         return []
 
 
-def fetch_today_events():
-    # type: () -> List[Dict[str, Any]]
+def fetch_today_events(force_fresh=False):
+    # type: (bool) -> List[Dict[str, Any]]
     """Return today's USD High/Medium-impact events, sorted by SGT time."""
     today_sgt = datetime.now(SGT).date()
-    raw = _fetch_raw(FF_URL)
+
+    raw = None
+    if not force_fresh:
+        raw = _load_raw_cache()
+    if raw is None:
+        raw = _fetch_raw(FF_URL)
+        if raw:
+            _save_raw_cache(raw)
 
     # Only try next week if today falls outside this week's data (e.g. weekend boundary)
     week_dates = set(_parse_ff_date(item.get("date", "")) for item in raw)

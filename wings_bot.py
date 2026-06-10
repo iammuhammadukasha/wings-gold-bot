@@ -39,7 +39,7 @@ def run_morning_alert():
     today = now_sgt.date()
 
     _log("Morning alert starting.")
-    events = fetch_today_events()
+    events = fetch_today_events(force_fresh=True)
 
     # Only show events that haven't occurred yet at time of posting
     remaining = [ev for ev in events if ev["time_sgt"] and ev["time_sgt"] > now_sgt]
