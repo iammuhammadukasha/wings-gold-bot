@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import requests
 import pytz
@@ -10,7 +11,7 @@ FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.xml"
 
 _CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
-_CACHE_TTL_SECONDS = 300  # 5 minutes — caps FF requests to ~12/hour
+_CACHE_TTL_SECONDS = 240  # 4 minutes — matches monitor project, avoids 429
 
 
 def _load_raw_cache():
@@ -137,12 +138,17 @@ def _fetch_raw(url, silent_404=False):
             headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"},
         )
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
+
+        # Decode as windows-1252 (FF XML encoding), fix unescaped & outside CDATA,
+        # then re-encode as UTF-8 so ElementTree is happy
+        text = resp.content.decode("windows-1252", errors="replace")
+        text = re.sub(r'&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', '&amp;', text)
+        root = ET.fromstring(text.encode("utf-8"))
+
         events = []
         for ev in root.findall("event"):
-            def _t(tag):
-                el = ev.find(tag)
-                return el.text.strip() if el is not None and el.text else ""
+            def _t(tag, _ev=ev):
+                return (ev.findtext(tag) or "").strip()
             events.append({
                 "title":    _t("title"),
                 "country":  _t("country"),
