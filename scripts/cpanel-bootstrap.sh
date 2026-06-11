@@ -36,7 +36,8 @@ echo ""
 
 export GIT_SSH_COMMAND="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 
-if ! ssh -i "$DEPLOY_KEY" -o IdentitiesOnly=yes -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+AUTH_MSG="$(ssh -i "$DEPLOY_KEY" -o IdentitiesOnly=yes -T git@github.com 2>&1 || true)"
+if ! echo "$AUTH_MSG" | grep -q "successfully authenticated"; then
     echo "GitHub auth not ready yet."
     echo "Add the deploy key above to GitHub, then re-run:"
     echo "  curl -fsSL https://raw.githubusercontent.com/iammuhammadukasha/wings-gold-bot/master/scripts/cpanel-bootstrap.sh | bash"
