@@ -17,6 +17,12 @@ STATE_DIR = "state"
 # backoff in ff._fetch_raw still protects us if FF rate-limits.
 FF_CACHE_TTL_SECONDS = 50
 
+# --- Morning alert -----------------------------------------------------------
+# Hour (SGT, 24h) at/after which the daily news summary fires. The --watch loop
+# self-gates on this in Asia/Singapore time, so it is immune to the server clock
+# (the box runs US/Eastern) and to DST drift — unlike a fixed cron hour.
+MORNING_ALERT_HOUR_SGT = 12
+
 # --- Post-release analysis ---------------------------------------------------
 # Wait this long after an event's scheduled time before expecting an `actual`.
 POST_RELEASE_DELAY_MIN = 1

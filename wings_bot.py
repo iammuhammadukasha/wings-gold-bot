@@ -32,6 +32,14 @@ try:
     from config import POST_RELEASE_EXPIRE_MIN
 except ImportError:
     POST_RELEASE_EXPIRE_MIN = 360
+try:
+    from config import MORNING_ALERT_HOUR_SGT
+except ImportError:
+    MORNING_ALERT_HOUR_SGT = 12
+
+# Reserved key in processed_events.json tracking the last day the morning alert
+# fired (so the every-minute --watch loop sends it exactly once per day).
+_MORNING_ALERT_KEY = "__morning_alert_date__"
 from ff import fetch_today_events, compare_snapshots, assess_result
 from notifier import send_message
 from state import load_snapshot, save_snapshot, load_processed, save_processed
@@ -154,12 +162,48 @@ def _process_post_release(events, now_sgt):
 # Workflow 2 — Watch (every 1 min): schedule changes + post-release
 # ---------------------------------------------------------------------------
 
+def _maybe_morning_alert(now_sgt, events):
+    """Fire the daily news summary once, at/after MORNING_ALERT_HOUR_SGT.
+
+    Self-gated in SGT so it is unaffected by the server clock (US/Eastern) or
+    DST. If the send fails it is retried on the next tick (the day is only
+    marked done once delivery succeeds).
+    """
+    if now_sgt.hour < MORNING_ALERT_HOUR_SGT:
+        return
+
+    today = now_sgt.date()
+    meta = load_processed()
+    if meta.get(_MORNING_ALERT_KEY) == today.isoformat():
+        return
+
+    remaining = [ev for ev in events if ev["time_sgt"] and ev["time_sgt"] > now_sgt]
+    if remaining:
+        msg = build_template_a(remaining, today)
+        label = "Template A ({} upcoming events)".format(len(remaining))
+    else:
+        msg = build_template_b(today)
+        label = "Template B (no upcoming events)"
+
+    if send_message(msg):
+        meta[_MORNING_ALERT_KEY] = today.isoformat()
+        save_processed(meta)
+        if events:
+            save_snapshot(events)
+        _log("Morning alert sent — {}.".format(label))
+    else:
+        _log("ERROR: Morning alert failed to send — will retry next tick.")
+
+
 def run_watch():
     now_sgt = datetime.now(SGT)
     _log("Watch tick.")
     events = fetch_today_events()
-    old_events = load_snapshot()
 
+    # 1) Daily morning alert, self-gated to 12:00 SGT (TZ/DST-safe).
+    _maybe_morning_alert(now_sgt, events)
+
+    old_events = load_snapshot()
     if not events:
         if old_events:
             _log("Watch: FF returned empty but snapshot has {} items — FF may be down. Skipping.".format(len(old_events)))
@@ -167,7 +211,7 @@ def run_watch():
             _log("Watch: no USD high/medium events for today.")
         return
 
-    # 1) Schedule-change detection → Template C. compare_snapshots only matches
+    # 2) Schedule-change detection → Template C. compare_snapshots only matches
     #    on event_key (which embeds the date), so a stale prior-day snapshot
     #    yields no false changes — it just re-baselines on save below.
     for ch in compare_snapshots(old_events, events):
@@ -175,7 +219,7 @@ def run_watch():
             _log("Schedule change sent: {} ({} → {}).".format(ch["title"], ch["old_time"], ch["new_time"]))
     save_snapshot(events)
 
-    # 2) Post-release analysis → Template D
+    # 3) Post-release analysis → Template D
     _process_post_release(events, now_sgt)
 
 
