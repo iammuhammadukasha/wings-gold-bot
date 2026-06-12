@@ -36,6 +36,14 @@ try:
     from config import MORNING_ALERT_HOUR_SGT
 except ImportError:
     MORNING_ALERT_HOUR_SGT = 12
+try:
+    from config import FF_HOT_CACHE_TTL_SECONDS
+except ImportError:
+    FF_HOT_CACHE_TTL_SECONDS = 90
+try:
+    from config import HOT_WINDOW_MIN
+except ImportError:
+    HOT_WINDOW_MIN = 30
 
 # Reserved key in processed_events.json tracking the last day the morning alert
 # fired (so the every-minute --watch loop sends it exactly once per day).
@@ -195,10 +203,32 @@ def _maybe_morning_alert(now_sgt, events):
         _log("ERROR: Morning alert failed to send — will retry next tick.")
 
 
+def _in_hot_window(events, now_sgt):
+    """True if any event is in its release window and still awaiting an actual.
+
+    We tighten FF polling only here so we catch a fresh `actual` quickly at
+    release time without 429-ing the CDN the rest of the day.
+    """
+    for ev in events:
+        t = ev["time_sgt"]
+        if t is None:
+            continue
+        minutes_since = (now_sgt - t).total_seconds() / 60.0
+        if -2 <= minutes_since <= HOT_WINDOW_MIN and not ev.get("actual", "").strip():
+            return True
+    return False
+
+
 def run_watch():
     now_sgt = datetime.now(SGT)
     _log("Watch tick.")
     events = fetch_today_events()
+
+    # Near a release, re-fetch on the hot path so a new actual shows up fast.
+    if events and _in_hot_window(events, now_sgt):
+        fresh = fetch_today_events(max_cache_age=FF_HOT_CACHE_TTL_SECONDS)
+        if fresh:
+            events = fresh
 
     # 1) Daily morning alert, self-gated to 12:00 SGT (TZ/DST-safe).
     _maybe_morning_alert(now_sgt, events)

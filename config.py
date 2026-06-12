@@ -12,10 +12,14 @@ PERSONAL_RECIPIENTS = [
 STATE_DIR = "state"
 
 # --- Forex Factory polling ---------------------------------------------------
-# Short TTL so the every-minute --watch job actually sees fresh data each run
-# (runs are 60s apart, so a 50s cache is expired by the next tick). The 429
-# backoff in ff._fetch_raw still protects us if FF rate-limits.
-FF_CACHE_TTL_SECONDS = 50
+# FF's CDN returns 429 on sub-minute polling, so we adapt how often we really
+# hit it. The --watch cron still runs every minute (cheap; serves cache), but
+# FF itself is fetched at most every FF_CACHE_TTL_SECONDS normally, tightening
+# to FF_HOT_CACHE_TTL_SECONDS only inside HOT_WINDOW_MIN around a scheduled
+# release — when a fresh `actual` actually matters.
+FF_CACHE_TTL_SECONDS = 300        # cold path (~5 min between real fetches)
+FF_HOT_CACHE_TTL_SECONDS = 90     # near a release (~90s between real fetches)
+HOT_WINDOW_MIN = 30               # minutes after release to stay on the hot path
 
 # --- Morning alert -----------------------------------------------------------
 # Hour (SGT, 24h) at/after which the daily news summary fires. The --watch loop

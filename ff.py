@@ -11,19 +11,23 @@ FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.xml"
 
 _CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
+# Cold-path TTL. FF's CDN 429s on sub-minute polling, so the every-minute cron
+# serves from cache here and only really hits FF this often. The caller passes a
+# shorter max_cache_age near a release (see fetch_today_events) for fresher data.
 try:
     from config import FF_CACHE_TTL_SECONDS as _CACHE_TTL_SECONDS
 except ImportError:
-    _CACHE_TTL_SECONDS = 50
+    _CACHE_TTL_SECONDS = 300
 
 
-def _load_raw_cache():
-    # type: () -> Optional[List[Dict]]
+def _load_raw_cache(max_age=None):
+    # type: (Optional[int]) -> Optional[List[Dict]]
+    ttl = _CACHE_TTL_SECONDS if max_age is None else max_age
     try:
         with open(_CACHE_FILE, "r") as f:
             data = json.load(f)
         age = (datetime.utcnow() - datetime.strptime(data["ts"], "%Y-%m-%dT%H:%M:%S")).total_seconds()
-        if age < _CACHE_TTL_SECONDS:
+        if age < ttl:
             return data["raw"]
     except Exception:
         pass
@@ -175,14 +179,17 @@ def _fetch_raw(url, silent_404=False):
         return []
 
 
-def fetch_today_events(force_fresh=False):
-    # type: (bool) -> List[Dict[str, Any]]
-    """Return today's USD High/Medium-impact events, sorted by SGT time."""
+def fetch_today_events(max_cache_age=None):
+    # type: (Optional[int]) -> List[Dict[str, Any]]
+    """Return today's USD High/Medium-impact events, sorted by SGT time.
+
+    max_cache_age: max acceptable cache age in seconds before re-fetching from
+    FF. None uses the cold-path TTL. Pass a small value (e.g. 90) near a release
+    for fresher data; pass 0 to force a fresh fetch.
+    """
     today_sgt = datetime.now(SGT).date()
 
-    raw = None
-    if not force_fresh:
-        raw = _load_raw_cache()
+    raw = _load_raw_cache(max_cache_age)
     if raw is None:
         raw = _fetch_raw(FF_URL)
         if raw:
