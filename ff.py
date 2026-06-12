@@ -11,7 +11,10 @@ FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.xml"
 
 _CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
-_CACHE_TTL_SECONDS = 240  # 4 minutes — matches monitor project, avoids 429
+try:
+    from config import FF_CACHE_TTL_SECONDS as _CACHE_TTL_SECONDS
+except ImportError:
+    _CACHE_TTL_SECONDS = 50
 
 
 def _load_raw_cache():

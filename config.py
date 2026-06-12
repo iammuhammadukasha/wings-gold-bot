@@ -11,5 +11,19 @@ PERSONAL_RECIPIENTS = [
 
 STATE_DIR = "state"
 
-POST_RELEASE_DELAY_MIN = 2
-POST_RELEASE_TIMEOUT_MIN = 60
+# --- Forex Factory polling ---------------------------------------------------
+# Short TTL so the every-minute --watch job actually sees fresh data each run
+# (runs are 60s apart, so a 50s cache is expired by the next tick). The 429
+# backoff in ff._fetch_raw still protects us if FF rate-limits.
+FF_CACHE_TTL_SECONDS = 50
+
+# --- Post-release analysis ---------------------------------------------------
+# Wait this long after an event's scheduled time before expecting an `actual`.
+POST_RELEASE_DELAY_MIN = 1
+# Hard cut-off: stop waiting for an `actual` this long after release. As long as
+# FF publishes the number within this window, the analysis is sent — even if it
+# arrives late. (Previously a 60-min "timeout" permanently skipped the event,
+# so a late/missed `actual` meant the analysis never went out at all.)
+POST_RELEASE_EXPIRE_MIN = 360
+# Kept for backward compatibility with any older cron/invocation.
+POST_RELEASE_TIMEOUT_MIN = POST_RELEASE_EXPIRE_MIN

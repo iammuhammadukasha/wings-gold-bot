@@ -4,8 +4,13 @@ Wings Gold Club — Telegram automation bot.
 
 Modes (invoked via cron):
   --morning-alert   Daily 12:00 PM SGT — Template A (news day) or B (quiet day)
-  --watchdog        Every 15 min     — Template C on schedule changes
-  --post-release    Every 1 min      — Template D after each event fires
+  --watch           Every 1 min      — schedule changes (Template C) AND
+                                        post-release analysis (Template D) in
+                                        a single FF fetch. Preferred.
+
+Legacy modes (still work; superseded by --watch):
+  --watchdog        Template C on schedule changes only
+  --post-release    Template D post-release analysis only
 """
 import argparse
 import sys
@@ -16,7 +21,17 @@ import pytz
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import POST_RELEASE_DELAY_MIN, POST_RELEASE_TIMEOUT_MIN
+# Defensive import: the server keeps its own config.py (restored by deploy.sh
+# after each git pull), which may predate these constants. Fall back to the
+# new defaults so a stale server config can never crash the bot on import.
+try:
+    from config import POST_RELEASE_DELAY_MIN
+except ImportError:
+    POST_RELEASE_DELAY_MIN = 1
+try:
+    from config import POST_RELEASE_EXPIRE_MIN
+except ImportError:
+    POST_RELEASE_EXPIRE_MIN = 360
 from ff import fetch_today_events, compare_snapshots, assess_result
 from notifier import send_message
 from state import load_snapshot, save_snapshot, load_processed, save_processed
@@ -59,13 +74,117 @@ def run_morning_alert():
         _log("ERROR: Morning alert failed to send.")
         sys.exit(1)
 
+    # Safety net: post analysis for any event already released by 12pm. The
+    # processed-state dedup means the --watch job won't double-send these.
+    _process_post_release(events, now_sgt)
+
 
 # ---------------------------------------------------------------------------
-# Workflow 2 — Watchdog (every 15 min)
+# Post-release analysis — shared helper
+# ---------------------------------------------------------------------------
+
+def _process_post_release(events, now_sgt):
+    """Send Template D (actual-vs-forecast) for each released event exactly once.
+
+    Terminal states in processed_events.json:
+      sent     — analysis delivered
+      expired  — no `actual` published within POST_RELEASE_EXPIRE_MIN
+
+    Any other state (pending / unseen) is re-checked every run. Crucially, an
+    `actual` is sent whenever it appears — even past the expire window and even
+    after a prior send failure — so a late or briefly-missed value still gets
+    posted instead of being dropped forever.
+    """
+    processed = load_processed()
+    changed = False
+
+    for ev in events:
+        key = ev["event_key"]
+        ev_time = ev["time_sgt"]
+        if ev_time is None:
+            continue
+
+        state = processed.get(key, {})
+        if state.get("status") in ("sent", "expired"):
+            continue
+
+        minutes_since = (now_sgt - ev_time).total_seconds() / 60.0
+        if minutes_since < POST_RELEASE_DELAY_MIN:
+            continue
+
+        actual = ev.get("actual", "").strip()
+        if actual:
+            result = assess_result(ev)
+            msg = build_template_d(ev, result)
+            if send_message(msg):
+                processed[key] = {
+                    "status": "sent",
+                    "sent_at": now_sgt.isoformat(),
+                    "minutes_after_release": round(minutes_since),
+                }
+                _log("Post-release sent: {} — {} ({:.0f} min after release).".format(
+                    ev["title"], result["assessment"], minutes_since))
+            else:
+                # Keep it pending so the next tick retries the send.
+                processed[key] = {
+                    "status": "pending",
+                    "attempts": state.get("attempts", 0) + 1,
+                    "last_error": "send_failed",
+                }
+                _log("ERROR: send failed for {} — will retry next tick.".format(ev["title"]))
+            changed = True
+            continue
+
+        # No actual yet.
+        if minutes_since > POST_RELEASE_EXPIRE_MIN:
+            processed[key] = {"status": "expired", "reason": "no_actual"}
+            _log("Post-release: {} expired — no actual within {} min.".format(
+                ev["title"], POST_RELEASE_EXPIRE_MIN))
+        else:
+            attempts = state.get("attempts", 0) + 1
+            processed[key] = {"status": "pending", "attempts": attempts}
+            _log("Post-release: {} — actual pending (attempt {}).".format(ev["title"], attempts))
+        changed = True
+
+    if changed:
+        save_processed(processed)
+
+
+# ---------------------------------------------------------------------------
+# Workflow 2 — Watch (every 1 min): schedule changes + post-release
+# ---------------------------------------------------------------------------
+
+def run_watch():
+    now_sgt = datetime.now(SGT)
+    _log("Watch tick.")
+    events = fetch_today_events()
+    old_events = load_snapshot()
+
+    if not events:
+        if old_events:
+            _log("Watch: FF returned empty but snapshot has {} items — FF may be down. Skipping.".format(len(old_events)))
+        else:
+            _log("Watch: no USD high/medium events for today.")
+        return
+
+    # 1) Schedule-change detection → Template C. compare_snapshots only matches
+    #    on event_key (which embeds the date), so a stale prior-day snapshot
+    #    yields no false changes — it just re-baselines on save below.
+    for ch in compare_snapshots(old_events, events):
+        if send_message(build_template_c(ch["title"], ch["old_time"], ch["new_time"])):
+            _log("Schedule change sent: {} ({} → {}).".format(ch["title"], ch["old_time"], ch["new_time"]))
+    save_snapshot(events)
+
+    # 2) Post-release analysis → Template D
+    _process_post_release(events, now_sgt)
+
+
+# ---------------------------------------------------------------------------
+# Legacy modes — superseded by --watch, kept so existing crons keep working
 # ---------------------------------------------------------------------------
 
 def run_watchdog():
-    _log("Watchdog starting.")
+    _log("Watchdog starting (legacy mode — prefer --watch).")
     events = fetch_today_events()
     old_events = load_snapshot()
 
@@ -74,72 +193,18 @@ def run_watchdog():
         return
 
     changes = compare_snapshots(old_events, events)
-
     if changes:
         for ch in changes:
-            msg = build_template_c(ch["title"], ch["old_time"], ch["new_time"])
-            send_message(msg)
+            send_message(build_template_c(ch["title"], ch["old_time"], ch["new_time"]))
             _log("Schedule change sent: {} ({} → {}).".format(ch["title"], ch["old_time"], ch["new_time"]))
         save_snapshot(events)
     else:
         _log("Watchdog: no changes detected.")
 
 
-# ---------------------------------------------------------------------------
-# Workflow 3 — Post-Release (every 1 min)
-# ---------------------------------------------------------------------------
-
 def run_post_release():
-    now_sgt = datetime.now(SGT)
-    events = fetch_today_events()
-    processed = load_processed()
-    changed = False
-
-    for ev in events:
-        key = ev["event_key"]
-        ev_time = ev["time_sgt"]
-
-        if ev_time is None:
-            continue
-
-        state = processed.get(key, {})
-        if state.get("status") in ("sent", "skipped"):
-            continue
-
-        minutes_since = (now_sgt - ev_time).total_seconds() / 60.0
-
-        if minutes_since < POST_RELEASE_DELAY_MIN:
-            continue
-
-        if minutes_since > POST_RELEASE_TIMEOUT_MIN:
-            processed[key] = {"status": "skipped", "reason": "timeout"}
-            _log("Post-release: {} timed out — no actual value within {} min.".format(
-                ev["title"], POST_RELEASE_TIMEOUT_MIN
-            ))
-            changed = True
-            continue
-
-        actual = ev.get("actual", "").strip()
-        if not actual:
-            attempts = state.get("attempts", 0) + 1
-            processed[key] = {"status": "pending", "attempts": attempts}
-            _log("Post-release: {} — actual not yet available (attempt {}).".format(ev["title"], attempts))
-            changed = True
-            continue
-
-        result = assess_result(ev)
-        msg = build_template_d(ev, result)
-        ok = send_message(msg)
-
-        if ok:
-            processed[key] = {"status": "sent", "sent_at": now_sgt.isoformat()}
-            _log("Post-release sent: {} — {}.".format(ev["title"], result["assessment"]))
-        else:
-            _log("ERROR: Failed to send post-release for {}.".format(ev["title"]))
-        changed = True
-
-    if changed:
-        save_processed(processed)
+    _log("Post-release starting (legacy mode — prefer --watch).")
+    _process_post_release(fetch_today_events(), datetime.now(SGT))
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +261,12 @@ def main():
     parser = argparse.ArgumentParser(description="Wings Gold Club Telegram Bot")
     parser.add_argument("--morning-alert", action="store_true",
                         help="Send daily morning alert (cron: 12:00 PM SGT = 04:00 UTC)")
+    parser.add_argument("--watch", action="store_true",
+                        help="Schedule changes + post-release analysis (cron: every 1 min)")
     parser.add_argument("--watchdog", action="store_true",
-                        help="Check for schedule changes (cron: every 15 min)")
+                        help="[legacy] Schedule-change check only")
     parser.add_argument("--post-release", action="store_true",
-                        help="Send post-release analysis (cron: every 1 min)")
+                        help="[legacy] Post-release analysis only")
     parser.add_argument("--test-all", action="store_true",
                         help="Send all four templates with sample data for review")
 
@@ -207,6 +274,8 @@ def main():
 
     if args.morning_alert:
         run_morning_alert()
+    elif args.watch:
+        run_watch()
     elif args.watchdog:
         run_watchdog()
     elif args.post_release:
