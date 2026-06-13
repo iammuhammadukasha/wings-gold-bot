@@ -10,6 +10,19 @@ from typing import List, Dict, Optional, Any
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.xml"
 
+# faireconomy is behind Cloudflare, which hard-throttles bot-identifying
+# User-Agents (e.g. "WingsGoldBot/1.0" → 429) while a normal browser UA is
+# served from the warm edge cache (200). Identify as a browser and send
+# browser-like Accept headers to stay on the cached path and dodge the 429s.
+_FF_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 _CACHE_FILE = os.path.join("state", "ff_raw_cache.json")
 # Cold-path TTL. FF's CDN 429s on sub-minute polling, so the every-minute cron
 # serves from cache here and only really hits FF this often. The caller passes a
@@ -150,15 +163,10 @@ def _fetch_raw(url, silent_404=False):
     # type: (str, bool) -> List[Dict]
     import time
     try:
-        resp = requests.get(
-            url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"},
-        )
+        resp = requests.get(url, timeout=15, headers=_FF_HEADERS)
         if resp.status_code == 429:
             time.sleep(3)
-            resp = requests.get(url, timeout=15,
-                                headers={"User-Agent": "Mozilla/5.0 (compatible; WingsGoldBot/1.0)"})
+            resp = requests.get(url, timeout=15, headers=_FF_HEADERS)
         resp.raise_for_status()
 
         # Decode as windows-1252 (FF XML encoding), fix unescaped & outside CDATA,
