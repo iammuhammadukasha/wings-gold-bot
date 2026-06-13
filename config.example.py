@@ -1,4 +1,8 @@
-BOT_TOKEN = "8277424435:AAGdTZjMC8dSMxpXxSl5DK8_5IALs59oYXk"
+# Copy this file to config.py and fill in real values. config.py is gitignored
+# and must NEVER be committed — it holds the bot token. On the server it lives
+# at /home/upayztec/wings-gold-bot/config.py and is preserved across deploys.
+
+BOT_TOKEN = "PUT-YOUR-BOTFATHER-TOKEN-HERE"
 CHANNEL_ID = "@wingsgoldclub"
 
 # Set to True once client approves and bot is ready to post to the channel
@@ -32,8 +36,5 @@ MORNING_ALERT_HOUR_SGT = 12
 POST_RELEASE_DELAY_MIN = 1
 # Hard cut-off: stop waiting for an `actual` this long after release. As long as
 # FF publishes the number within this window, the analysis is sent — even if it
-# arrives late. (Previously a 60-min "timeout" permanently skipped the event,
-# so a late/missed `actual` meant the analysis never went out at all.)
+# arrives late.
 POST_RELEASE_EXPIRE_MIN = 360
-# Kept for backward compatibility with any older cron/invocation.
-POST_RELEASE_TIMEOUT_MIN = POST_RELEASE_EXPIRE_MIN
