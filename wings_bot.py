@@ -48,7 +48,7 @@ except ImportError:
 # Reserved key in processed_events.json tracking the last day the morning alert
 # fired (so the every-minute --watch loop sends it exactly once per day).
 _MORNING_ALERT_KEY = "__morning_alert_date__"
-from ff import fetch_today_events, compare_snapshots, assess_result
+from ff import fetch_today_events, compare_snapshots, assess_result, last_feed_size
 from notifier import send_message
 from state import load_snapshot, save_snapshot, load_processed, save_processed
 from templates import build_template_a, build_template_b, build_template_c, build_template_d
@@ -235,10 +235,10 @@ def run_watch():
 
     old_events = load_snapshot()
     if not events:
-        if old_events:
-            _log("Watch: FF returned empty but snapshot has {} items — FF may be down. Skipping.".format(len(old_events)))
+        if last_feed_size() == 0:
+            _log("Watch: FF feed unreachable/empty (likely throttled) — keeping snapshot of {} items, skipping.".format(len(old_events)))
         else:
-            _log("Watch: no USD high/medium events for today.")
+            _log("Watch: feed OK ({} events this week), no USD high/medium events for today.".format(last_feed_size()))
         return
 
     # 2) Schedule-change detection → Template C. compare_snapshots only matches

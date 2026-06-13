@@ -58,6 +58,16 @@ INVERTED_INDICATORS = [
 
 IMPACT_FILTER = {"high", "medium"}
 
+# Size of the raw feed from the most recent fetch_today_events() call. Lets
+# callers tell "feed unreachable / throttled" (0) apart from "feed fine, just no
+# USD events today" (>0) — they both yield an empty event list otherwise.
+last_raw_count = 0
+
+
+def last_feed_size():
+    # type: () -> int
+    return last_raw_count
+
 
 def _is_inverted(title):
     # type: (str) -> bool
@@ -187,6 +197,7 @@ def fetch_today_events(max_cache_age=None):
     FF. None uses the cold-path TTL. Pass a small value (e.g. 90) near a release
     for fresher data; pass 0 to force a fresh fetch.
     """
+    global last_raw_count
     today_sgt = datetime.now(SGT).date()
 
     raw = _load_raw_cache(max_cache_age)
@@ -200,6 +211,8 @@ def fetch_today_events(max_cache_age=None):
     if today_sgt not in week_dates:
         extra = _fetch_raw(FF_URL_NEXT, silent_404=True)
         raw = raw + extra
+
+    last_raw_count = len(raw)
 
     events = []
     for item in raw:
