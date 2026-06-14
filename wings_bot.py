@@ -177,6 +177,12 @@ def _maybe_morning_alert(now_sgt, events):
     DST. If the send fails it is retried on the next tick (the day is only
     marked done once delivery succeeds).
     """
+    # Markets are closed on weekends — no USD releases Sat/Sun, so skip the
+    # daily alert entirely (otherwise it sent a pointless "no news" Template B
+    # at noon SGT on Saturday and Sunday). weekday(): Mon=0 .. Sun=6.
+    if now_sgt.weekday() >= 5:
+        return
+
     if now_sgt.hour < MORNING_ALERT_HOUR_SGT:
         return
 
