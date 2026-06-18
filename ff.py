@@ -197,6 +197,166 @@ def _fetch_raw(url, silent_404=False):
         return []
 
 
+# ---------------------------------------------------------------------------
+# Forex Factory site fallback for `actual` values.
+#
+# The faireconomy mirror (ff_calendar_thisweek.xml/.json) has stopped publishing
+# `actual` values — the field is absent for every event, so the post-release
+# analysis (Template D) never has a number to compare and silently expires. FF's
+# own calendar page still serves actuals inside a `window.calendarComponentStates`
+# JSON blob, so when a released event is missing its actual we backfill it from
+# there, matched by currency + title. Fail-soft: any error just leaves `actual`
+# empty (current behaviour), it never blocks an alert.
+# ---------------------------------------------------------------------------
+
+_SITE_URL_FMT   = "https://www.forexfactory.com/calendar?day={mon}{day}.{year}"
+_SITE_CACHE_FILE = os.path.join("state", "ff_site_actuals.json")
+_SITE_CACHE_TTL  = 120  # seconds; FF site is heavier than the mirror, poll gently
+
+
+def _norm_title(title):
+    # type: (str) -> str
+    return re.sub(r"\s+", " ", title.replace("\\/", "/")).strip().lower()
+
+
+def _site_day_param(event_date):
+    # type: (date) -> str
+    return "{}{}.{}".format(
+        event_date.strftime("%b").lower(), event_date.day, event_date.year
+    )
+
+
+def _load_site_cache(day_param):
+    # type: (str) -> Optional[Dict[str, Dict[str, str]]]
+    try:
+        with open(_SITE_CACHE_FILE, "r") as f:
+            data = json.load(f)
+        if data.get("day") != day_param:
+            return None
+        age = (datetime.utcnow() - datetime.strptime(data["ts"], "%Y-%m-%dT%H:%M:%S")).total_seconds()
+        if age < _SITE_CACHE_TTL:
+            return data.get("actuals", {})
+    except Exception:
+        pass
+    return None
+
+
+def _save_site_cache(day_param, actuals):
+    # type: (str, Dict[str, Dict[str, str]]) -> None
+    try:
+        if not os.path.exists("state"):
+            os.makedirs("state")
+        with open(_SITE_CACHE_FILE, "w") as f:
+            json.dump({
+                "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+                "day": day_param,
+                "actuals": actuals,
+            }, f)
+    except Exception:
+        pass
+
+
+def _parse_site_actuals(html):
+    # type: (str) -> Dict[str, Dict[str, str]]
+    """Pull {norm_title: {actual, forecast}} for USD events from FF's JS state blob.
+
+    Only events with a non-empty `actual` are returned — an absent actual means
+    the number hasn't printed yet and we should keep waiting on the mirror/site.
+    """
+    out = {}
+    # Each event is a JSON object beginning with `{"id":<n>,"ebaseId":...`.
+    for chunk in re.split(r'\{"id":\d+,"ebaseId"', html)[1:]:
+        cur = re.search(r'"currency":"([^"]*)"', chunk)
+        if not cur or cur.group(1) != "USD":
+            continue
+        name = re.search(r'"name":"([^"]*)"', chunk)
+        act  = re.search(r'"actual":"([^"]*)"', chunk)
+        if not name or not act:
+            continue
+        actual = act.group(1).strip()
+        if not actual:
+            continue
+        fc = re.search(r'"forecast":"([^"]*)"', chunk)
+        out[_norm_title(name.group(1))] = {
+            "actual":   actual,
+            "forecast": (fc.group(1).strip() if fc else ""),
+        }
+    return out
+
+
+def _http_get_site(url):
+    # type: (str) -> Optional[str]
+    """GET an FF calendar page, returning HTML or None.
+
+    FF sits behind Cloudflare, which JA3-fingerprints the TLS client: Python's
+    `requests` is served a JS challenge page (no data), while `curl` is allowed
+    through. So fetch via curl first and only fall back to requests if curl is
+    unavailable. The response must contain the data blob to count as a hit.
+    """
+    ua = _FF_HEADERS["User-Agent"]
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["curl", "-s", "--compressed", "--max-time", "25",
+             "-A", ua, "-H", "Accept: text/html,application/xhtml+xml", url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+        )
+        html = proc.stdout.decode("utf-8", errors="ignore")
+        if "calendarComponentStates" in html:
+            return html
+    except Exception as e:
+        print("FF site curl error ({}): {}".format(url, e))
+
+    try:  # last resort — often a Cloudflare challenge, but try anyway
+        resp = requests.get(url, timeout=20, headers=_FF_HEADERS)
+        resp.raise_for_status()
+        if "calendarComponentStates" in resp.text:
+            return resp.text
+    except Exception as e:
+        print("FF site requests error ({}): {}".format(url, e))
+    return None
+
+
+def _fetch_site_actuals(event_date):
+    # type: (date) -> Dict[str, Dict[str, str]]
+    day_param = _site_day_param(event_date)
+    cached = _load_site_cache(day_param)
+    if cached is not None:
+        return cached
+    url = _SITE_URL_FMT.format(
+        mon=event_date.strftime("%b").lower(), day=event_date.day, year=event_date.year
+    )
+    html = _http_get_site(url)
+    actuals = _parse_site_actuals(html) if html else {}
+    # Cache even an empty result to avoid hammering FF every minute before release.
+    _save_site_cache(day_param, actuals)
+    return actuals
+
+
+def _backfill_actuals(events):
+    # type: (List[Dict[str, Any]]) -> None
+    """For released-but-actual-less events, fill `actual`/`forecast` from FF's site."""
+    now_sgt = datetime.now(SGT)
+    pending = [
+        ev for ev in events
+        if not ev.get("actual")
+        and ev.get("time_sgt") and now_sgt >= ev["time_sgt"]
+    ]
+    if not pending:
+        return
+    # All pending events share today's date here; fetch that day once.
+    site = _fetch_site_actuals(pending[0]["date"])
+    if not site:
+        return
+    for ev in pending:
+        hit = site.get(_norm_title(ev["title"]))
+        if not hit:
+            continue
+        ev["actual"] = hit["actual"]
+        if not ev.get("forecast") and hit.get("forecast"):
+            ev["forecast"] = hit["forecast"]
+
+
 def fetch_today_events(max_cache_age=None):
     # type: (Optional[int]) -> List[Dict[str, Any]]
     """Return today's USD High/Medium-impact events, sorted by SGT time.
@@ -234,6 +394,10 @@ def fetch_today_events(max_cache_age=None):
         events.append(_build_event(item, event_date))
 
     events.sort(key=lambda x: x["time_sgt"] if x["time_sgt"] else datetime.max.replace(tzinfo=SGT))
+
+    # The faireconomy mirror no longer carries `actual` values; backfill any
+    # released event's actual from FF's own calendar page so Template D can fire.
+    _backfill_actuals(events)
     return events
 
 
