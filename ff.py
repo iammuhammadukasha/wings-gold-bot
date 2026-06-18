@@ -298,7 +298,15 @@ def _http_get_site(url):
         import subprocess
         proc = subprocess.run(
             ["curl", "-s", "--compressed", "--max-time", "25",
-             "-A", ua, "-H", "Accept: text/html,application/xhtml+xml", url],
+             "-A", ua,
+             "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+             "-H", "Accept-Language: en-US,en;q=0.9",
+             "-H", "Referer: https://www.forexfactory.com/calendar",
+             "-H", "Upgrade-Insecure-Requests: 1",
+             "-H", "Sec-Fetch-Dest: document",
+             "-H", "Sec-Fetch-Mode: navigate",
+             "-H", "Sec-Fetch-Site: same-origin",
+             url],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
         )
         html = proc.stdout.decode("utf-8", errors="ignore")
