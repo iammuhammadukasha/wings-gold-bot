@@ -31,7 +31,16 @@ HOT_WINDOW_MIN = 30               # minutes after release to stay on the hot pat
 # (the box runs US/Eastern) and to DST drift — unlike a fixed cron hour.
 MORNING_ALERT_HOUR_SGT = 12
 
+# --- Pre-release countdown reminders -----------------------------------------
+# Lead times (minutes before an event) at which the bot fires a countdown
+# reminder, for every High/Medium USD event in the day's summary. Each fires
+# once; the closest lead (<=15) uses urgent "stand aside" copy. Order/dupes
+# don't matter — the code sorts and de-dupes.
+REMINDER_LEAD_MINUTES = [60, 15]
+
 # --- Post-release analysis ---------------------------------------------------
+# Post-release analysis (Template D) is RED-only: only High-impact releases get
+# an actual-vs-forecast breakdown. Medium events still get summary + reminders.
 # Wait this long after an event's scheduled time before expecting an `actual`.
 POST_RELEASE_DELAY_MIN = 1
 # Hard cut-off: stop waiting for an `actual` this long after release. As long as

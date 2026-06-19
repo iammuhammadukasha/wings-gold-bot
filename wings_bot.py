@@ -4,9 +4,11 @@ Wings Gold Club — Telegram automation bot.
 
 Modes (invoked via cron):
   --morning-alert   Daily 12:00 PM SGT — Template A (news day) or B (quiet day)
-  --watch           Every 1 min      — schedule changes (Template C) AND
-                                        post-release analysis (Template D) in
-                                        a single FF fetch. Preferred.
+  --watch           Every 1 min      — daily summary (A/B), schedule changes
+                                        (Template C), pre-release countdown
+                                        reminders (T-60 / T-15) AND post-release
+                                        analysis (Template D, red-only) in a
+                                        single FF fetch. Preferred.
 
 Legacy modes (still work; superseded by --watch):
   --watchdog        Template C on schedule changes only
@@ -44,14 +46,25 @@ try:
     from config import HOT_WINDOW_MIN
 except ImportError:
     HOT_WINDOW_MIN = 30
+try:
+    # Lead times (minutes before an event) at which to fire a countdown reminder.
+    from config import REMINDER_LEAD_MINUTES
+except ImportError:
+    REMINDER_LEAD_MINUTES = [60, 15]
 
 # Reserved key in processed_events.json tracking the last day the morning alert
 # fired (so the every-minute --watch loop sends it exactly once per day).
 _MORNING_ALERT_KEY = "__morning_alert_date__"
+# Namespaced dedup key for a per-event countdown reminder. Kept distinct from the
+# bare event_key (used by post-release state) so the two never collide.
+_REMINDER_KEY_FMT = "__reminder_{lead}__{event_key}"
 from ff import fetch_today_events, compare_snapshots, assess_result, last_feed_size
 from notifier import send_message
 from state import load_snapshot, save_snapshot, load_processed, save_processed
-from templates import build_template_a, build_template_b, build_template_c, build_template_d
+from templates import (
+    build_template_a, build_template_b, build_template_c, build_template_d,
+    build_template_reminder,
+)
 
 SGT = pytz.timezone("Asia/Singapore")
 
@@ -118,6 +131,12 @@ def _process_post_release(events, now_sgt):
         key = ev["event_key"]
         ev_time = ev["time_sgt"]
         if ev_time is None:
+            continue
+
+        # Post-release analysis is RED-only: only High-impact USD releases get a
+        # Template D breakdown. Medium events still appear in the summary and get
+        # countdown reminders, but no actual-vs-forecast analysis.
+        if ev.get("impact", "").lower() != "high":
             continue
 
         state = processed.get(key, {})
@@ -209,6 +228,55 @@ def _maybe_morning_alert(now_sgt, events):
         _log("ERROR: Morning alert failed to send — will retry next tick.")
 
 
+def _process_reminders(events, now_sgt):
+    """Send a pre-release countdown reminder at each configured lead time.
+
+    Default leads are T-60 and T-15 (config: REMINDER_LEAD_MINUTES). Applies to
+    every event in the day's summary — High and Medium impact alike.
+
+    Each (event, lead) reminder fires exactly once, deduped under a namespaced
+    key in processed_events.json. Each lead only fires inside its own band
+    (lower < minutes_until <= lead, where `lower` is the next tighter lead, or 0
+    for the closest): so if the bot is down through a whole band that reminder is
+    skipped rather than sent late — we never send a "1 hour before" notice at
+    T-20. A failed send stays un-deduped and retries on the next tick.
+    """
+    leads = sorted({int(m) for m in REMINDER_LEAD_MINUTES}, reverse=True)
+    if not leads:
+        return
+
+    processed = load_processed()
+    changed = False
+
+    for ev in events:
+        ev_time = ev["time_sgt"]
+        if ev_time is None:
+            continue
+        minutes_until = (ev_time - now_sgt).total_seconds() / 60.0
+        if minutes_until <= 0:
+            continue  # already at/after release — handled by post-release
+
+        for i, lead in enumerate(leads):
+            lower = leads[i + 1] if i + 1 < len(leads) else 0
+            if not (lower < minutes_until <= lead):
+                continue
+            key = _REMINDER_KEY_FMT.format(lead=lead, event_key=ev["event_key"])
+            if processed.get(key, {}).get("status") == "sent":
+                break
+            if send_message(build_template_reminder(ev, lead)):
+                processed[key] = {"status": "sent", "sent_at": now_sgt.isoformat()}
+                _log("Reminder T-{} sent: {} (release {}).".format(
+                    lead, ev["title"], ev["time_sgt_str"]))
+            else:
+                _log("ERROR: reminder T-{} send failed for {} — will retry next tick.".format(
+                    lead, ev["title"]))
+            changed = True
+            break  # minutes_until lands in exactly one band
+
+    if changed:
+        save_processed(processed)
+
+
 def _in_hot_window(events, now_sgt):
     """True if any event is in its release window and still awaiting an actual.
 
@@ -255,7 +323,10 @@ def run_watch():
             _log("Schedule change sent: {} ({} → {}).".format(ch["title"], ch["old_time"], ch["new_time"]))
     save_snapshot(events)
 
-    # 3) Post-release analysis → Template D
+    # 3) Pre-release countdown reminders (T-60 / T-15) → Template E/F
+    _process_reminders(events, now_sgt)
+
+    # 4) Post-release analysis → Template D (High-impact / red events only)
     _process_post_release(events, now_sgt)
 
 
@@ -316,6 +387,17 @@ def run_test_all():
 
     _log("Sending Template C (schedule change)...")
     send_message(build_template_c("Non-Farm Payrolls", "08:30 PM SGT", "09:00 PM SGT"))
+
+    reminder_event = {
+        "title": "Non-Farm Payrolls",
+        "impact": "High",
+        "time_sgt_str": "08:30 PM SGT",
+        "forecast": "175K",
+        "previous": "142K",
+    }
+    for lead in sorted({int(m) for m in REMINDER_LEAD_MINUTES}, reverse=True):
+        _log("Sending countdown reminder (T-{})...".format(lead))
+        send_message(build_template_reminder(reminder_event, lead))
 
     _log("Sending Template D (post-release result)...")
     sample_event = {

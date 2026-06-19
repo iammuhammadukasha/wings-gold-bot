@@ -51,6 +51,73 @@ def build_template_b(today):
     return "\n".join(lines)
 
 
+def _lead_label(minutes_before):
+    # type: (int) -> str
+    """Human phrasing for a lead time, e.g. 60 -> '1 HOUR', 15 -> '15 MIN'."""
+    if minutes_before >= 60 and minutes_before % 60 == 0:
+        hrs = minutes_before // 60
+        return "{} HOUR".format(hrs) if hrs == 1 else "{} HOURS".format(hrs)
+    return "{} MIN".format(minutes_before)
+
+
+def _lead_phrase(minutes_before):
+    # type: (int) -> str
+    if minutes_before >= 60 and minutes_before % 60 == 0:
+        hrs = minutes_before // 60
+        return "~1 hour" if hrs == 1 else "~{} hours".format(hrs)
+    return "~{} minutes".format(minutes_before)
+
+
+def build_template_reminder(event, minutes_before):
+    # type: (Dict, int) -> str
+    """Pre-release countdown reminder for a scheduled USD event.
+
+    Fired at each configured lead time (default T-60 and T-15). Copy hardens as
+    the release nears: the final (<=15 min) reminder is an urgent stand-aside
+    warning, earlier ones are a heads-up to start managing risk.
+    """
+    is_high = event.get("impact", "").lower() == "high"
+    impact_icon = "\U0001f534" if is_high else "\U0001f7e0"
+    final = minutes_before <= 15
+
+    if final:
+        header = "\U0001f6a8 WINGS GOLD CLUB — NEWS COUNTDOWN ({}) \U0001f6a8".format(
+            _lead_label(minutes_before))
+        intro = "Final warning — {} drops in {}.".format(
+            event["title"], _lead_phrase(minutes_before))
+        action = (
+            "Spreads will widen and volatility will spike at the print. Lock in "
+            "management on any open trades now, then stand aside through the "
+            "release and let the structure form before re-engaging."
+        )
+    else:
+        header = "⏰ WINGS GOLD CLUB — NEWS COUNTDOWN ({}) ⏰".format(
+            _lead_label(minutes_before))
+        intro = "Heads up traders — a USD economic release is coming up in {}.".format(
+            _lead_phrase(minutes_before))
+        action = (
+            "Start trimming exposure and tightening risk ahead of the release. "
+            "Avoid opening fresh positions into the news window."
+        )
+
+    lines = [
+        header,
+        "",
+        intro,
+        "",
+        "\U0001f4cb Event: {}".format(event["title"]),
+        "\U0001f550 Release: {}".format(event.get("time_sgt_str", "TBD")),
+        "{} Impact: {}".format(impact_icon, "High" if is_high else "Medium"),
+        "• \U0001f7e1 Forecast: {}".format(event.get("forecast") or "N/A"),
+        "• ⚪ Previous: {}".format(event.get("previous") or "N/A"),
+        "",
+        action,
+        "",
+        "Wings Gold Club",
+    ]
+    return "\n".join(lines)
+
+
 def build_template_c(event_name, old_time, new_time):
     # type: (str, str, str) -> str
     lines = [
